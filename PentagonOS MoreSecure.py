@@ -1,4 +1,4 @@
-import tkinter as tk
+mport tkinter as tk
 from tkinter import messagebox, Menu, Toplevel, Label, Button, Entry, scrolledtext, filedialog, Listbox, Scrollbar, Text, END
 import subprocess
 import os
@@ -10,14 +10,21 @@ from time import strftime
 
 CONFIG_FILE = "skeepos_config.ini"
 
-# Load or initialize configuration
-config = configparser.ConfigParser()
-if not os.path.exists(CONFIG_FILE):
-    config['Settings'] = {'password': '4'}
+def load_password():
+    config = configparser.ConfigParser()
+    if not os.path.exists(CONFIG_FILE):
+        config['Settings'] = {'password': '4'}
+        with open(CONFIG_FILE, 'w') as configfile:
+            config.write(configfile)
+    else:
+        config.read(CONFIG_FILE)
+    return config['Settings'].get('password', '4')
+
+def save_password(new_password):
+    config = configparser.ConfigParser()
+    config['Settings'] = {'password': new_password}
     with open(CONFIG_FILE, 'w') as configfile:
         config.write(configfile)
-else:
-    config.read(CONFIG_FILE)
 
 class TerminalApp(Toplevel):
     def __init__(self, master):
@@ -146,24 +153,69 @@ class SettingsPanel(Toplevel):
     def __init__(self, master):
         super().__init__(master)
         self.title("Settings")
-        self.geometry("300x200")
+        self.geometry("300x150")
 
-        Label(self, text="Change Password", font=("Arial", 14)).pack(pady=10)
-        Label(self, text="New Password:").pack()
-        self.new_password_entry = Entry(self, show="*")
+        Label(self, text="Change Password:", font=("Arial", 12)).pack(pady=10)
+        self.new_password_entry = Entry(self, show="*", font=("Arial", 14))
         self.new_password_entry.pack(pady=5)
         Button(self, text="Save", command=self.save_password).pack(pady=10)
 
     def save_password(self):
-        new_password = self.new_password_entry.get().strip()
+        new_password = self.new_password_entry.get()
         if new_password:
-            config['Settings']['password'] = new_password
-            with open(CONFIG_FILE, 'w') as configfile:
-                config.write(configfile)
-            messagebox.showinfo("Success", "Password updated successfully!")
+            save_password(new_password)
+            messagebox.showinfo("Success", "Password changed successfully!")
             self.destroy()
         else:
             messagebox.showerror("Error", "Password cannot be empty.")
+
+class StartMenuSearchPanel(Toplevel):
+    def __init__(self, master):
+        super().__init__(master)
+        self.title("Search Files")
+        self.geometry("500x400")
+
+        Label(self, text="Search Files in Home Directory:", font=("Arial", 12)).pack(pady=5)
+        self.search_entry = Entry(self, width=50)
+        self.search_entry.pack(pady=5)
+        self.search_entry.bind("<Return>", self.perform_search)
+
+        self.result_listbox = Listbox(self, width=70)
+        self.result_listbox.pack(side="left", fill="both", expand=True)
+        self.result_listbox.bind("<Double-Button-1>", self.open_selected_file)
+
+        scrollbar = Scrollbar(self)
+        scrollbar.pack(side="right", fill="y")
+        self.result_listbox.config(yscrollcommand=scrollbar.set)
+        scrollbar.config(command=self.result_listbox.yview)
+
+        self.file_content = Text(self, wrap="word", height=10)
+        self.file_content.pack(fill="both", expand=True)
+
+        self.search_dir = os.path.expanduser("~")
+
+    def perform_search(self, event=None):
+        query = self.search_entry.get().lower()
+        self.result_listbox.delete(0, END)
+        for root, dirs, files in os.walk(self.search_dir):
+            for name in files:
+                if query in name.lower():
+                    full_path = os.path.join(root, name)
+                    self.result_listbox.insert(END, full_path)
+
+    def open_selected_file(self, event=None):
+        selected = self.result_listbox.get(self.result_listbox.curselection())
+        try:
+            if os.access(selected, os.X_OK):
+                os.startfile(selected)
+            else:
+                with open(selected, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                self.file_content.delete(1.0, END)
+                self.file_content.insert(END, content)
+        except Exception as e:
+            self.file_content.delete(1.0, END)
+            self.file_content.insert(END, f"Error opening file: {e}")
 
 class SkeepOS:
     def __init__(self, root):
@@ -172,6 +224,7 @@ class SkeepOS:
         self.root.geometry("800x600")
         self.root.configure(bg="black")
         winsound.PlaySound(r"C:\Windows\Media\Ring01.wav", winsound.SND_FILENAME | winsound.SND_ASYNC)
+        self.password = load_password()
         self.show_login_screen()
 
     def show_login_screen(self):
@@ -200,7 +253,7 @@ class SkeepOS:
         tk.Button(self.login_frame, text="Login", font=("Arial", 14), command=self.check_password).pack(pady=10)
 
     def check_password(self):
-        if self.password_entry.get() == config['Settings']['password']:
+        if self.password_entry.get() == self.password:
             self.show_desktop()
         else:
             messagebox.showerror("Error", "Incorrect Password")
@@ -240,6 +293,7 @@ class SkeepOS:
         menu.add_command(label="Wallpapers", command=self.open_wallpaper_app)
         menu.add_command(label="Terminal", command=self.open_terminal)
         menu.add_command(label="Settings", command=self.open_settings_panel)
+        menu.add_command(label="Search Files", command=lambda: StartMenuSearchPanel(self.root))
         menu.add_command(label="Shutdown", command=self.shutdown_os)
         menu.post(self.start_button.winfo_rootx(), self.start_button.winfo_rooty() - menu.winfo_reqheight())
 
@@ -252,8 +306,9 @@ class SkeepOS:
             ("Edge", self.open_edge, "Edge browser for skeepOS", 450, 50),
             ("Calculator", lambda: subprocess.Popen(["calc.exe"]), "Calculator for skeepOS", 550, 50),
             ("Terminal", self.open_terminal, "Terminal for skeepOS", 650, 50),
-            ("Settings", self.open_settings_panel, "Settings Panel for skeepOS", 50, 150),
-            ("File Manager", self.open_file_explorer, "File Manager for skeepOS", 150, 150)
+            ("Search", lambda: StartMenuSearchPanel(self.root), "Search files in home directory", 50, 150),
+            ("Settings", self.open_settings_panel, "Change system settings", 150, 150),
+            ("FileMgr", self.open_file_explorer, "File Manager for skeepOS", 250, 150)
         ]
         for label, func, desc, x, y in apps:
             icon = tk.Button(self.desktop_frame, text=label, width=10, height=2, command=func)
